@@ -2,8 +2,10 @@
 
 This guide walks us through the manual verification of the VPC project (Parts 1–5) before we run the Makefile automation. Follow the steps in order. 
 Each section contains the commands to run, what to expect, and troubleshooting notes.
-Read more about building you own vpc on linux on my blog post here: 
-Video demonstation lnk: 
+
+Read more about building you own vpc on linux on my blog post here: https://medium.com/@seadesokan/building-a-vpc-virtual-private-cloud-on-a-linux-host-beginner-guide-98c19098ec49?postPublishedType=initial
+
+Video demonstation lnk: https://www.loom.com/share/f3de180ddae2413c8cbbcc59b2b5c5e9
 
 
 ## Prerequisites
