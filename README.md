@@ -209,23 +209,6 @@ Then test again from your host:
 curl -I http://10.50.2.10
 ```
 
-Expected:
-
-Expected: reachable by default (bridge exposure). This is normal behavior in Linux since the host shares the bridge.
-
-**Simulate True Private Subnet Isolation**
-
-To make the private subnet unreachable from the host (more realistic private behavior), apply these iptables rules:
-
-```
-sudo iptables -A FORWARD -i br-$VPC_A -d $PRV_A -j DROP
-sudo iptables -A INPUT -s $PRV_A -j DROP
-```
-Lets test again:
-
-```
-curl -I http://10.50.2.10
-```
 Expected: Timeout or connection refused.
 
 This ensures the host cannot directly access private subnet namespaces while maintaining internal communication between subnets.
@@ -321,7 +304,244 @@ sudo ip netns exec ns-$VPC_A-public ping -c 3 10.60.1.10
 sudo ip netns exec ns-$VPC_B-public ping -c 3 10.50.1.10
 ```
 
-✅ Expected:
+Expected:
 Both should succeed — this confirms your peering link is active and routes are properly in place.
+
+
+<img width="1150" height="497" alt="Screenshot 2025-11-12 at 14 10 31" src="https://github.com/user-attachments/assets/540c2524-3a04-44c4-b413-ebee6a7d097c" />
+
+
+## **Task 4 — Firewall & Security Groups**
+
+**Objective**
+
+We Use a JSON file to define ingress rules for a subnet namespace (allow or deny ports/protocols), and apply them dynamically with your vpcctl.py apply-policy command.
+
+### Step 1 — Create the policy file
+
+Create a file named policy_public.json:
+
+```
+vim policy_public.json
+```
+
+
+Paste this:
+```
+{
+  "subnet": "10.50.1.0/24",
+  "ingress": [
+    {"port": 80, "protocol": "tcp", "action": "allow"},
+    {"port": 22, "protocol": "tcp", "action": "deny"}
+  ]
+}
+```
+
+Then save and exit 
+
+This policy means:
+
+- Allow HTTP (port 80)
+
+- Deny SSH (port 22)
+
+- Drop all other unsolicited inbound traffic by default
+
+### Step 2 — Apply the firewall policy
+
+Run:
+
+```
+sudo ./vpcctl.py apply-policy --policy policy_public.json
+```
+
+<img width="694" height="189" alt="Screenshot 2025-11-12 at 14 15 48" src="https://github.com/user-attachments/assets/d7ed26dc-9360-489d-a124-7bf50242103a" />
+
+### Step 3 — Verify rules inside the namespace
+
+You can confirm the rules were applied correctly:
+
+```
+sudo ip netns exec ns-demo-public iptables -L -n -v
+```
+<img width="1047" height="478" alt="Screenshot 2025-11-12 at 14 16 49" src="https://github.com/user-attachments/assets/3697de12-b8b2-4f3f-9943-e71db23a7924" />
+
+### Step 4 — Test behavior
+
+Start a simple web server in the public namespace:
+
+```
+sudo ip netns exec ns-demo-public python3 -m http.server 80 &
+```
+
+Then from your host, try both:
+
+Port 80 (should succeed)
+
+```
+curl -I http://10.50.1.10
+```
+<img width="579" height="61" alt="Screenshot 2025-11-12 at 14 21 37" src="https://github.com/user-attachments/assets/56a43219-b0c0-41b2-bbf5-213a911b5692" />
+
+
+❌ Port 22 (should fail)
+
+```
+nc -zv 10.50.1.10 22
+```
+
+## **Task 5 — Cleanup & Automation**
+
+- Ensure full lifecycle management:
+
+- Cleanly remove VPCs, namespaces, bridges, and routes.
+
+- Verify idempotency (safe to rerun).
+
+- Automate common tasks (create, list, peer, test, delete) in your Makefile.
+
+### Step 1 — Validate delete-vpc cleanup
+
+Run:
+
+```
+sudo ./vpcctl.py delete-vpc --name $VPC_A || true
+sudo ./vpcctl.py delete-vpc --name $VPC_B || true
+```
+
+Confirm:
+
+```
+ip netns list
+ip link show | grep br-
+```
+No ns-demo-* namespaces and no br-demo or br-demo-b bridges.
+
+<img width="597" height="248" alt="Screenshot 2025-11-12 at 14 36 28" src="https://github.com/user-attachments/assets/1901bd70-3fa6-4991-88cb-32575c98f7a2" />
+
+
+## **Makefile Automation**
+
+Now let’s plug it all together.
+We update our Makefile so it automates every major phase — creation, listing, policy, peering, testing, and cleanup.
+
+### Step 1: Create both VPCs
+
+Run:
+
+```
+make create
+```
+
+This will:
+
+- Create VPC A (demo) and VPC B (demo-b)
+
+- Add their public and private subnets
+
+- Enable NAT for public subnets
+
+- Log every step clearly
+
+<img width="734" height="659" alt="Screenshot 2025-11-12 at 14 46 51" src="https://github.com/user-attachments/assets/64cbac73-4e8d-4a47-a4d7-f2f69842566a" />
+
+
+Check progress:
+
+```
+ip netns list
+ip link show | grep br-
+p link show grep | veth
+```
+
+<img width="831" height="771" alt="Screenshot 2025-11-12 at 14 48 32" src="https://github.com/user-attachments/assets/be1481ca-9abb-41b5-b13b-b06307693398" />
+
+### Step 2- Deploy apps (optional)
+
+You can manually start demo HTTP servers inside each public subnet:
+
+```
+sudo ip netns exec ns-demo-public python3 -m http.server 80 &
+sudo ip netns exec ns-demo-b-public python3 -m http.server 80 &
+```
+
+Then verify:
+
+```
+curl -I http://10.50.1.10
+curl -I http://10.60.1.10
+```
+
+<img width="1447" height="286" alt="Screenshot 2025-11-12 at 14 50 33" src="https://github.com/user-attachments/assets/0fc227aa-f485-4712-a94d-b172b11c81ab" />
+
+### Step 3 — Apply security policy
+
+Apply your JSON-based firewall:
+
+```
+make policy
+```
+
+Check applied rules:
+
+```
+sudo ip netns exec ns-demo-public iptables -L -n -v
+```
+
+<img width="814" height="493" alt="Screenshot 2025-11-12 at 14 52 54" src="https://github.com/user-attachments/assets/0dd9d11a-5db0-4328-9dec-20f98001b1dc" />
+
+### Step 4 — Peer both VPCs
+
+Establish peering:
+
+```
+make peer
+```
+
+This links br-demo ↔ br-demo-b via veth and configures static routes for the allowed CIDRs.
+
+Test inter-VPC reachability:
+
+```
+make test
+```
+
+Unpeer:
+
+```
+make unpeer
+```
+<img width="666" height="691" alt="Screenshot 2025-11-12 at 14 54 56" src="https://github.com/user-attachments/assets/c8b6627b-33aa-4551-be6a-155cbc0513ea" />
+
+### Step 5 — Cleanup
+
+To remove everything:
+
+```
+make cleanup
+```
+
+This automatically:
+
+- Deletes namespaces and bridges
+
+- Unmounts /run/netns handles
+
+- Flushes iptables NAT/forward rules
+
+- Removes metadata JSON
+
+Expected End State When finished:
+
+```
+ip netns list       # no lingering namespaces
+bridge link show    # no br-demo or br-demo-b
+sudo iptables -L FORWARD -n -v | grep br-
+# (empty)
+```
+<img width="747" height="953" alt="Screenshot 2025-11-12 at 14 58 11" src="https://github.com/user-attachments/assets/0e9b66a2-3145-4065-9ab7-d20a3f03376f" />
+
+Environment is clean, reusable, and automation-ready.
+
 
 
