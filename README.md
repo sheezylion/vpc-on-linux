@@ -130,7 +130,7 @@ sudo ip netns exec ns-$VPC_A-private ping -c 3 10.50.1.10
 ```
 <img width="977" height="605" alt="Screenshot 2025-11-12 at 12 51 11" src="https://github.com/user-attachments/assets/c1374c2a-a633-43da-ac7c-71b82b3db6c9" />
 
-## **Task 1 — Core VPC Creation (manual)**
+## **Task 2 — Routing and NAT gateway**
 
 ### Step 1 — Check NAT Configuration
 
